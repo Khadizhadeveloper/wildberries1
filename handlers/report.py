@@ -69,7 +69,6 @@ async def report_handler(message: Message):
         [InlineKeyboardButton(text="Вчера", callback_data="period:yesterday")],
         [InlineKeyboardButton(text="Последние 7 дней", callback_data="period:last_7_days")],
         [InlineKeyboardButton(text="Произвольный период", callback_data="period:custom_period")],
-        [InlineKeyboardButton(text="Отчет за 2024-07-20", callback_data="report:2024-07-20")],
     ])
     await message.answer("Выберите период для отчета:", reply_markup=markup)
 
@@ -77,8 +76,6 @@ async def report_handler(message: Message):
 @router.callback_query(lambda c: c.data.startswith("period:"))
 async def period_callback_handler(callback: CallbackQuery):
     logger.info(f"Получен callback {callback.data} от пользователя {callback.from_user.id}")
-
-
     period = callback.data.split(":")[1]
 
     # Получаем текущую дату
@@ -98,27 +95,10 @@ async def period_callback_handler(callback: CallbackQuery):
     elif period == "custom_period":
         await callback.message.answer("Отправьте дату начала периода (например, 2024-07-01):")
         return  # Ожидаем получения даты начала и окончания периода от пользователя
-    elif period == "2024-07-20":
-        date_from = "2024-07-20"
-        date_to = "2024-07-20"
-
-# Обработчик команды /report
-@router.message(Command(commands=["report"]))
-async def report_handler(message: Message):
-    # Создаем кнопки для выбора действия
-    markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Отчет за 2024-07-20", callback_data="report:2024-07-20")]
-    ])
-    await message.answer("Выберите действие:", reply_markup=markup)
-
-# Обработчик кнопки "Отчет за 2024-07-20"
-@router.callback_query(lambda c: c.data.startswith("report:"))
-async def report_callback_handler(callback: CallbackQuery):
-    date = callback.data.split(":")[1]  # Получаем дату из callback_data
 
     try:
         # Получаем данные о продажах
-        sales_data = get_sales_data(API_KEY, date)
+        sales_data = get_sales_data(API_KEY, date_from)
 
         # Если вернулся текст ошибки, выводим его
         if isinstance(sales_data, str):
@@ -127,7 +107,7 @@ async def report_callback_handler(callback: CallbackQuery):
 
         # Проверяем, есть ли данные
         if not sales_data:
-            await callback.message.answer(f"Нет данных о продажах за {date}.")
+            await callback.message.answer(f"Нет данных о продажах за {date_from}.")
             return
 
         # Рассчитываем метрики
@@ -135,7 +115,7 @@ async def report_callback_handler(callback: CallbackQuery):
 
         # Формируем отчет
         report = (
-            f"📊 *Отчет о продажах за {date}*\n\n"
+            f"📊 *Отчет о продажах за {date_from}*\n\n"
             f"- 💰 *Общая сумма продаж:* {metrics['total_sales']} руб.\n"
             f"- 📦 *Количество проданных единиц:* {metrics['units_sold']}\n"
             f"- 📊 *Средняя цена продажи:* {metrics['avg_price']:.2f} руб.\n"

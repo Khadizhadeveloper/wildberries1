@@ -26,10 +26,10 @@ logger = logging.getLogger(__name__)
 WB_SALES_URL = "https://statistics-api.wildberries.ru/api/v1/supplier/sales"
 
 
-# Токен бота
+
 BOT_TOKEN = "8196919721:AAFmkrZCvB7gr_8amwqK6lshNrPph2UouH4"
 
-# Путь к конфигурационному файлу
+
 CONFIG_PATH = Path("config.json")
 
 # Инициализация бота и диспетчера
@@ -43,7 +43,7 @@ dp.include_router(shops)
 dp.include_router(del_shop)
 
 
-# Функция для загрузки конфигурации
+
 def load_config():
     if CONFIG_PATH.exists():
         with open(CONFIG_PATH, "r") as f:
@@ -51,13 +51,13 @@ def load_config():
     return {"shops": []}
 
 
-# Функция для сохранения конфигурации
+
 def save_config(config):
     with open(CONFIG_PATH, "w") as f:
         json.dump(config, f, indent=4)
 
 
-# Загружаем конфигурацию
+
 config = load_config()
 
 

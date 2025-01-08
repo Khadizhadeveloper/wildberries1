@@ -12,13 +12,13 @@ logger = logging.getLogger(__name__)
 CONFIG_PATH = Path("config.json")
 
 def load_config():
-    """Загружает конфигурацию магазинов из файла."""
+
     if CONFIG_PATH.exists():
         with open(CONFIG_PATH, "r") as f:
             return json.load(f)
     return {"shops": []}
 
 def save_config(config):
-    """Сохраняет конфигурацию магазинов в файл."""
+
     with open(CONFIG_PATH, "w") as f:
         json.dump(config, f, indent=4)

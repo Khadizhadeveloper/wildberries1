@@ -2,6 +2,18 @@ from aiogram import Router
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 import requests
+from datetime import datetime, timedelta
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,  # Уровень логирования
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler("bot.log"),  # Логирование в файл
+        logging.StreamHandler()          # Логирование в консоль
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # Конфигурация
 WB_SALES_URL = "https://statistics-api.wildberries.ru/api/v1/supplier/sales"
@@ -14,24 +26,28 @@ def get_sales_data(api_key, date):
     headers = {"Authorization": f"Bearer {api_key}"}
     params = {"dateFrom": date, "dateTo": date}
     try:
+        logger.info(f"Запрос данных о продажах за {date}")
         response = requests.get(WB_SALES_URL, headers=headers, params=params)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.HTTPError as e:
+        logger.error(f"HTTP ошибка при запросе данных за {date}: {e}")
         return f"HTTP ошибка: {e}\nОтвет от API: {response.text}"
     except Exception as e:
+        logger.error(f"Неизвестная ошибка при запросе данных за {date}: {e}")
         return f"Неизвестная ошибка: {e}"
 
 # Функция для расчета метрик
 def calculate_metrics(sales_data):
-    total_sales = sum(item.get("totalPrice", 0) for item in sales_data)  # Общая сумма продаж
-    total_commission = sum(item.get("paymentSaleAmount", 0) for item in sales_data)  # Комиссия Wildberries
-    total_discounts = sum(item.get("discountPercent", 0) * item.get("totalPrice", 0) / 100 for item in sales_data)  # Скидки Wildberries
-    total_acquiring = sum((item.get("forPay", 0) * item.get("spp", 0) / 100) for item in sales_data)  # Комиссия эквайринга
-    total_logistics = sum(item.get("finishedPrice", 0) - item.get("forPay", 0) for item in sales_data)  # Стоимость логистики
-    total_storage = 0  # Стоимость хранения: отсутствует в данных
-    units_sold = len(sales_data)  # Количество проданных единиц
-    avg_price = total_sales / units_sold if units_sold > 0 else 0  # Средняя цена продажи
+    logger.info("Рассчитываем метрики продаж")
+    total_sales = sum(item.get("totalPrice", 0) for item in sales_data)
+    total_commission = sum(item.get("paymentSaleAmount", 0) for item in sales_data)
+    total_discounts = sum(item.get("discountPercent", 0) * item.get("totalPrice", 0) / 100 for item in sales_data)
+    total_acquiring = sum((item.get("forPay", 0) * item.get("spp", 0) / 100) for item in sales_data)
+    total_logistics = sum(item.get("finishedPrice", 0) - item.get("forPay", 0) for item in sales_data)
+    total_storage = 0
+    units_sold = len(sales_data)
+    avg_price = total_sales / units_sold if units_sold > 0 else 0
 
     return {
         "total_sales": total_sales,
@@ -43,6 +59,48 @@ def calculate_metrics(sales_data):
         "units_sold": units_sold,
         "avg_price": avg_price,
     }
+
+# Обработчик команды /report
+@router.message(Command("report"))
+async def report_handler(message: Message):
+    logger.info(f"Получена команда /report от пользователя {message.from_user.id}")
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Сегодня", callback_data="period:today")],
+        [InlineKeyboardButton(text="Вчера", callback_data="period:yesterday")],
+        [InlineKeyboardButton(text="Последние 7 дней", callback_data="period:last_7_days")],
+        [InlineKeyboardButton(text="Произвольный период", callback_data="period:custom_period")],
+        [InlineKeyboardButton(text="Отчет за 2024-07-20", callback_data="report:2024-07-20")],
+    ])
+    await message.answer("Выберите период для отчета:", reply_markup=markup)
+
+# Обработчик выбора периода
+@router.callback_query(lambda c: c.data.startswith("period:"))
+async def period_callback_handler(callback: CallbackQuery):
+    logger.info(f"Получен callback {callback.data} от пользователя {callback.from_user.id}")
+
+
+    period = callback.data.split(":")[1]
+
+    # Получаем текущую дату
+    today = datetime.now()
+
+    # Определяем дату начала и окончания в зависимости от выбранного периода
+    if period == "today":
+        date_from = today.strftime("%Y-%m-%d")
+        date_to = date_from
+    elif period == "yesterday":
+        yesterday = today - timedelta(days=1)
+        date_from = yesterday.strftime("%Y-%m-%d")
+        date_to = date_from
+    elif period == "last_7_days":
+        date_from = (today - timedelta(days=7)).strftime("%Y-%m-%d")
+        date_to = today.strftime("%Y-%m-%d")
+    elif period == "custom_period":
+        await callback.message.answer("Отправьте дату начала периода (например, 2024-07-01):")
+        return  # Ожидаем получения даты начала и окончания периода от пользователя
+    elif period == "2024-07-20":
+        date_from = "2024-07-20"
+        date_to = "2024-07-20"
 
 # Обработчик команды /report
 @router.message(Command(commands=["report"]))

@@ -16,29 +16,38 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 WB_SALES_URL = "https://statistics-api.wildberries.ru/api/v1/supplier/sales"
-API_KEY = "ваш_ключ_api"
+API_KEY = "eyJhbGciOiJFUzI1NiIsImtpZCI6IjIwMjQxMjE3djEiLCJ0eXAiOiJKV1QifQ.eyJlbnQiOjEsImV4cCI6MTc1MDY1MDU0NiwiaWQiOiIwMTkzZWYwZS1kMzc0LTcxMjUtODEwZC1jZGJkYjcyYjI0YmQiLCJpaWQiOjU2Mjc5OTIxLCJvaWQiOjEzMDMyMjMsInMiOjEwNzM3NDk3NTgsInNpZCI6IjhkYjJmYmFjLWZjOTUtNDQzMy05OWVhLTE1ZjljNmI5ODUxMiIsInQiOmZhbHNlLCJ1aWQiOjU2Mjc5OTIxfQ.YMl4wjsGjfF00JfP_H6WMNvJainxTmjSC2HyjfHsbQWO1OEPYrrz8S_q-W2BptXLz7ZTIgC0f1n72FJgzEB4ZA"
 
 router = Router()
 
 user_data = {}  # Словарь для временного хранения данных пользователя
 
 
-# Функция для получения данных о продажах
+
 def get_sales_data(api_key, date_from, date_to):
     headers = {"Authorization": f"Bearer {api_key}"}
     params = {"dateFrom": date_from, "dateTo": date_to}
     try:
         logger.info(f"Запрос данных о продажах с {date_from} по {date_to}")
         response = requests.get(WB_SALES_URL, headers=headers, params=params)
-        response.encoding = 'utf-8'
-        response.raise_for_status()
+        response.encoding = "utf-8"  # Установка корректной кодировки
+        logger.info(f"Ответ от API (до обработки): {response.text[:500]}")
+        # Проверка на валидный JSON
+        if not response.text.strip().startswith("[") or not response.text.strip().endswith("]"):
+            logger.error("Ответ API не является корректным JSON.")
+            return "Ошибка: некорректный формат данных."
+        # Парсинг JSON
         return response.json()
     except requests.exceptions.HTTPError as e:
         logger.error(f"HTTP ошибка: {e}")
-        return f"HTTP ошибка: {e}\nОтвет от API: {response.text}"
+        return f"HTTP ошибка: {e}\nОтвет от API: {response.text[:500]}"
+    except ValueError as e:
+        logger.error(f"Ошибка при парсинге JSON: {e}")
+        return f"Ошибка при парсинге данных: {e}"
     except Exception as e:
         logger.error(f"Неизвестная ошибка: {e}")
         return f"Неизвестная ошибка: {e}"
+
 
 
 # Функция для расчета метрик
@@ -161,3 +170,4 @@ async def generate_report(message, date_from, date_to):
     except Exception as e:
         logger.error(f"Ошибка при генерации отчета: {e}")
         await message.answer(f"Ошибка при генерации отчета: {e}")
+

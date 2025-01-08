@@ -6,36 +6,40 @@ from datetime import datetime, timedelta
 import logging
 
 logging.basicConfig(
-    level=logging.INFO,  # Уровень логирования
+    level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
-        logging.FileHandler("bot.log"),  # Логирование в файл
-        logging.StreamHandler()          # Логирование в консоль
+        logging.FileHandler("bot.log", encoding="utf-8"),
+        logging.StreamHandler()
     ]
 )
 logger = logging.getLogger(__name__)
 
-# Конфигурация
 WB_SALES_URL = "https://statistics-api.wildberries.ru/api/v1/supplier/sales"
-API_KEY = "eyJhbGciOiJFUzI1NiIsImtpZCI6IjIwMjQxMjE3djEiLCJ0eXAiOiJKV1QifQ.eyJlbnQiOjEsImV4cCI6MTc1MDY1MDU0NiwiaWQiOiIwMTkzZWYwZS1kMzc0LTcxMjUtODEwZC1jZGJkYjcyYjI0YmQiLCJpaWQiOjU2Mjc5OTIxLCJvaWQiOjEzMDMyMjMsInMiOjEwNzM3NDk3NTgsInNpZCI6IjhkYjJmYmFjLWZjOTUtNDQzMy05OWVhLTE1ZjljNmI5ODUxMiIsInQiOmZhbHNlLCJ1aWQiOjU2Mjc5OTIxfQ.YMl4wjsGjfF00JfP_H6WMNvJainxTmjSC2HyjfHsbQWO1OEPYrrz8S_q-W2BptXLz7ZTIgC0f1n72FJgzEB4ZA"
+API_KEY = "ваш_ключ_api"
 
 router = Router()
 
+user_data = {}  # Словарь для временного хранения данных пользователя
+
+
 # Функция для получения данных о продажах
-def get_sales_data(api_key, date):
+def get_sales_data(api_key, date_from, date_to):
     headers = {"Authorization": f"Bearer {api_key}"}
-    params = {"dateFrom": date, "dateTo": date}
+    params = {"dateFrom": date_from, "dateTo": date_to}
     try:
-        logger.info(f"Запрос данных о продажах за {date}")
+        logger.info(f"Запрос данных о продажах с {date_from} по {date_to}")
         response = requests.get(WB_SALES_URL, headers=headers, params=params)
+        response.encoding = 'utf-8'
         response.raise_for_status()
         return response.json()
     except requests.exceptions.HTTPError as e:
-        logger.error(f"HTTP ошибка при запросе данных за {date}: {e}")
+        logger.error(f"HTTP ошибка: {e}")
         return f"HTTP ошибка: {e}\nОтвет от API: {response.text}"
     except Exception as e:
-        logger.error(f"Неизвестная ошибка при запросе данных за {date}: {e}")
+        logger.error(f"Неизвестная ошибка: {e}")
         return f"Неизвестная ошибка: {e}"
+
 
 # Функция для расчета метрик
 def calculate_metrics(sales_data):
@@ -60,6 +64,7 @@ def calculate_metrics(sales_data):
         "avg_price": avg_price,
     }
 
+
 # Обработчик команды /report
 @router.message(Command("report"))
 async def report_handler(message: Message):
@@ -72,50 +77,76 @@ async def report_handler(message: Message):
     ])
     await message.answer("Выберите период для отчета:", reply_markup=markup)
 
+
 # Обработчик выбора периода
 @router.callback_query(lambda c: c.data.startswith("period:"))
 async def period_callback_handler(callback: CallbackQuery):
     logger.info(f"Получен callback {callback.data} от пользователя {callback.from_user.id}")
     period = callback.data.split(":")[1]
 
-    # Получаем текущую дату
     today = datetime.now()
 
-    # Определяем дату начала и окончания в зависимости от выбранного периода
     if period == "today":
-        date_from = today.strftime("%Y-%m-%d")
-        date_to = date_from
+        date_from = date_to = today.strftime("%Y-%m-%d")
     elif period == "yesterday":
         yesterday = today - timedelta(days=1)
-        date_from = yesterday.strftime("%Y-%m-%d")
-        date_to = date_from
+        date_from = date_to = yesterday.strftime("%Y-%m-%d")
     elif period == "last_7_days":
         date_from = (today - timedelta(days=7)).strftime("%Y-%m-%d")
         date_to = today.strftime("%Y-%m-%d")
     elif period == "custom_period":
-        await callback.message.answer("Отправьте дату начала периода (например, 2024-07-01):")
-        return  # Ожидаем получения даты начала и окончания периода от пользователя
+        user_data[callback.from_user.id] = {"step": "start_date"}
+        await callback.message.answer("Введите начальную дату в формате ГГГГ-ММ-ДД:")
+        return
 
+    await generate_report(callback.message, date_from, date_to)
+
+
+# Обработчик ввода начальной и конечной даты
+@router.message()
+async def handle_custom_dates(message: Message):
+    user_id = message.from_user.id
+
+    if user_id in user_data and "step" in user_data[user_id]:
+        step = user_data[user_id]["step"]
+
+        if step == "start_date":
+            try:
+                start_date = datetime.strptime(message.text, "%Y-%m-%d").strftime("%Y-%m-%d")
+                user_data[user_id]["start_date"] = start_date
+                user_data[user_id]["step"] = "end_date"
+                await message.answer("Введите конечную дату в формате ГГГГ-ММ-ДД:")
+            except ValueError:
+                await message.answer("Неверный формат даты. Попробуйте снова (ГГГГ-ММ-ДД).")
+
+        elif step == "end_date":
+            try:
+                end_date = datetime.strptime(message.text, "%Y-%m-%d").strftime("%Y-%m-%d")
+                start_date = user_data[user_id]["start_date"]
+
+                del user_data[user_id]  # Очищаем данные пользователя
+
+                await generate_report(message, start_date, end_date)
+            except ValueError:
+                await message.answer("Неверный формат даты. Попробуйте снова (ГГГГ-ММ-ДД).")
+
+
+async def generate_report(message, date_from, date_to):
     try:
-        # Получаем данные о продажах
-        sales_data = get_sales_data(API_KEY, date_from)
+        sales_data = get_sales_data(API_KEY, date_from, date_to)
 
-        # Если вернулся текст ошибки, выводим его
         if isinstance(sales_data, str):
-            await callback.message.answer(f"Ошибка при запросе данных: {sales_data}")
+            await message.answer(f"Ошибка при запросе данных: {sales_data}")
             return
 
-        # Проверяем, есть ли данные
         if not sales_data:
-            await callback.message.answer(f"Нет данных о продажах за {date_from}.")
+            await message.answer(f"Нет данных о продажах с {date_from} по {date_to}.")
             return
 
-        # Рассчитываем метрики
         metrics = calculate_metrics(sales_data)
 
-        # Формируем отчет
         report = (
-            f"📊 *Отчет о продажах за {date_from}*\n\n"
+            f"📊 *Отчет о продажах с {date_from} по {date_to}*\n\n"
             f"- 💰 *Общая сумма продаж:* {metrics['total_sales']} руб.\n"
             f"- 📦 *Количество проданных единиц:* {metrics['units_sold']}\n"
             f"- 📊 *Средняя цена продажи:* {metrics['avg_price']:.2f} руб.\n"
@@ -126,6 +157,7 @@ async def period_callback_handler(callback: CallbackQuery):
             f"- 📦 *Стоимость хранения:* {metrics['total_storage']} руб.\n"
         )
 
-        await callback.message.answer(report, parse_mode="Markdown")
+        await message.answer(report, parse_mode="Markdown")
     except Exception as e:
-        await callback.message.answer(f"Ошибка при генерации отчета: {e}")
+        logger.error(f"Ошибка при генерации отчета: {e}")
+        await message.answer(f"Ошибка при генерации отчета: {e}")
